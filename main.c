@@ -30,12 +30,28 @@
 
 #ifdef __linux
 #include <linux/if_packet.h>
-#include <net/if.h>
 #endif
+
+#ifdef __FreeBSD__
+#include <net/if_dl.h>
+#include <netinet/in.h>
+#include <net/if_types.h>
+#define AF_PACKET       AF_LINK             // kludge for AF_PACKET on *bsd
+#endif
+
+#include <net/if.h>
 
 #define FLAG_SHOW_IPV4  (1 << 0)
 #define FLAG_SHOW_IPV6  (1 << 1)
 #define FLAG_SHOW_MAC   (1 << 2)
+
+#ifdef __linux
+typedef struct sockaddr_ll   sockinfo_t;
+#endif
+
+#ifdef __FreeBSD__
+typedef struct sockaddr_dl   sockinfo_t;
+#endif
 
 struct _config_s
 {
@@ -55,11 +71,15 @@ main(int argc, char **argv)
 {
     struct ifaddrs      *ifaddr;
     struct ifaddrs      *ifa;
-    struct sockaddr_ll  *saddr;
+
+    // struct sockaddr_ll  *saddr;
+    sockinfo_t          *saddr;
+
     int                 family;
     char                host[NI_MAXHOST];
     char                mac[20];
     struct _config_s    config;
+    unsigned char       byte;
     char                *pos;
     int                 len;
     int                 i;
@@ -99,18 +119,37 @@ main(int argc, char **argv)
 
         if (family == AF_PACKET && config.flags & FLAG_SHOW_MAC)
         {
+            saddr = (sockinfo_t*)ifa->ifa_addr;
+            memset(mac, 0 , sizeof(mac));
+            len = 0;
+
+#ifdef __linux
             // skip loopback devices.  they dont have a hwaddr
             if (ifa->ifa_flags & IFF_LOOPBACK) continue;
 
-            saddr = (struct sockaddr_ll*)ifa->ifa_addr;
+            // saddr = (struct sockaddr_ll*)ifa->ifa_addr;
 
-            memset(mac, 0 , sizeof(mac));
-            len = 0;
             for(i = 0;i < 6;i++)
             {
+                byte = (unsigned char)saddr->sll_addr[i];
+
                 len += sprintf(mac + len, "%02X%s",
-                    saddr->sll_addr[i], i < 5 ? ":":"");
+                    byte, i < 5 ? ":":"");
             }
+#endif
+
+#ifdef  __FreeBSD__
+            // skip loopback devices.  they dont have a hwaddr
+            if (saddr->sdl_type == IFT_LOOP) continue;
+
+            for(i = 0;i < 6;i++)
+            {
+                byte = (unsigned char)LLADDR(saddr)[i];
+
+                len += sprintf(mac + len, "%02X%s",
+                    byte, i < 5 ? ":":"");
+            }
+#endif
 
             printf("%s %s\n", ifa->ifa_name, mac);
         }
